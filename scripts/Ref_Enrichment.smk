@@ -111,7 +111,7 @@ rule GVCFSplit:
         threads=1
     shell:
         r"""
-            bcftools +split {input.gvcf} -Oz -R {input.reg} > {output}
+            bcftools view {input.gvcf} -Oz -R {input.reg} -o {output}
         """
 '''
 list_creater_input={}
