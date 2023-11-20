@@ -33,8 +33,9 @@ chromosomes, = glob_wildcards("chr_pos_test/chr{chr_id}/")
 
 numberOfRegions() #number of splits per chromosome
 out_files=[]
+#expanding the output files before adding them into the rule all.
 for chr in chrs:
-    _out_per_chr=expand("apply_var_recal/splits/chr{c}/chr{c}_reg{i}.recalibrated.vcf.gz", c=chr, i=range(1,chr_reg[chr]))
+    _out_per_chr=expand("apply_var_recal/splits/chr{c}/chr{c}_reg{i}.recalibrated.vcf.gz", c=chr, i=range(1,chr_reg[chr]+1))
     out_files.extend(_out_per_chr)
 
 rule all:
@@ -74,6 +75,7 @@ rule HaplotypeCaller:
         -ERC GVCF \
         -I {input} \
         --output-mode EMIT_ALL_ACTIVE_SITES \
+        --create-output-variant-index true \
         --native-pair-hmm-threads {resources.threads} \
         --min-pruning 2 --force-call-filtered-alleles true --alleles {params.chr_pos}
         """
@@ -112,6 +114,7 @@ rule GVCFSplit:
     shell:
         r"""
             bcftools view {input.gvcf} -Oz -R {input.reg} -o {output}
+            bcftools index -t {output}
         """
 '''
 list_creater_input={}
@@ -121,9 +124,9 @@ for chr in chrs:
     list_creater.extend(_list_per_chr)
     list_creater_input[chr]=list_creater
 '''
-def list_creater(wildcards):
+def list_creater(chr, reg):
     list_creater=[]
-    _list_per_chr=expand("gvcf/splits/chr{c}/{sample}_reg{i}.g.vcf.gz", c=wildcards, i=range(1,chr_reg[chr]), sample=SAMPLES)
+    _list_per_chr=expand("gvcf/splits/chr{c}/{sample}_reg{i}.g.vcf.gz", c=chr, i=reg, sample=SAMPLES)
     list_creater.extend(_list_per_chr)
     return(list_creater)
 
@@ -132,7 +135,7 @@ rule ListCreater:
     input:
         #"gvcf/splits/chr{c}/{SAMPLES}_reg{i}.g.vcf.gz"
         #("gvcf/splits/chr{c}/{SAMPLES}_reg{i}.g.vcf.gz")
-        lambda wildcards: list_creater({wildcards.c})
+        lambda wildcards: list_creater({wildcards.c}, {wildcards.i})
     output:
         "gvcf/splits/chr{c}/chr{c}_reg{i}_gvcf.list"
     shell:
@@ -235,6 +238,7 @@ rule VariantRecalibrator:
         -O {output.recal} \
         --tranches-file {output.tranch} \
         --rscript-file {output.r_script} \
+        --dont-run-rscript \
         -L {params.chr_pos} \
         --trust-all-polymorphic
         """   
