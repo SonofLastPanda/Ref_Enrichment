@@ -102,7 +102,7 @@ rule GVCFSplit:
     output:
         "gvcf/splits/chr{c}/{SAMPLES}_reg{i}.g.vcf.gz"
     log:
-        "gvcf/GVCFSplit/chr{c}/{SAMPLES}_reg{i}.log"
+        "logs/GVCFSplit/chr{c}/{SAMPLES}_reg{i}.log"
     envmodules:
         "bcftools"
     resources:
