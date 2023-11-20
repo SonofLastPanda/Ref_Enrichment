@@ -3,7 +3,7 @@
 import os
 
 configfile: "/gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/scripts/config.yaml"
-bams=["100_19965_20", "101_19226_20", "102_19843_20", "10_30_20","103_19902_20"]
+#bams=["100_19965_20", "101_19226_20", "102_19843_20", "10_30_20","103_19902_20"]
 
 chr_reg={}
 chrs=[22]
@@ -28,10 +28,13 @@ def output_files():
 '''
 
 SAMPLES, = glob_wildcards("poles_example/{sample}.bam")
-numberOfRegions()
+chromosomes, = glob_wildcards("chr_pos_test/chr{chr_id}/")
+
+
+numberOfRegions() #number of splits per chromosome
 out_files=[]
 for chr in chrs:
-    _out_per_chr=expand("apply_var_recal/splits/chr{c}/chr{c}_reg{i}.recalibrated.vcf.gz", c=chr, i=chr_reg[chr])
+    _out_per_chr=expand("apply_var_recal/splits/chr{c}/chr{c}_reg{i}.recalibrated.vcf.gz", c=chr, i=range(1,chr_reg[chr]))
     out_files.extend(_out_per_chr)
 
 rule all:
@@ -39,9 +42,6 @@ rule all:
         #lambda wildcards: output_files()
         out_files
 
-##READ:https://www.biostars.org/p/335903/ glob_wildcards
-##https://snakemake.readthedocs.io/en/stable/project_info/faq.html#how-do-i-run-my-rule-on-all-files-of-a-certain-directory
-##https://www.biostars.org/p/396035/
 
 #Call germline SNPs and indels via local re-assembly of haplotypes.
 #capable of calling SNPs via local de-novo assembly of haplotypes in an active region.
@@ -77,7 +77,23 @@ rule HaplotypeCaller:
         --native-pair-hmm-threads {resources.threads} \
         --min-pruning 2 --force-call-filtered-alleles true --alleles {params.chr_pos}
         """
-
+'''
+rule IndexVcf:
+    input:
+        "gvcf/chr{c}/{SAMPLES}.g.vcf.gz"
+    output:
+        "gvcf/chr{c}/{SAMPLES}.g.vcf.gz.tbi"
+    envmodules:
+        "bcftools"
+    resources:
+        mem='1g',
+        time='00:30:0',
+        threads=1
+    shell:
+        r"""
+            bcftools index -t -f {input} -o {output}
+        """
+'''
 
 rule GVCFSplit:
     input:
@@ -95,20 +111,28 @@ rule GVCFSplit:
         threads=1
     shell:
         r"""
-            bcftools +split {input.gvcf} -Oz -R {input.reg} -o {output}
+            bcftools +split {input.gvcf} -Oz -R {input.reg} > {output}
         """
-
-list_creater_input=[]
+'''
+list_creater_input={}
 for chr in chrs:
-    _list_per_chr=expand("gvcf/splits/chr{c}/{sample}_reg{i}.g.vcf.gz", c=chr, i=chr_reg[chr], sample=SAMPLES)
-    list_creater_input.extend(_list_per_chr)
+    list_creater=[]
+    _list_per_chr=expand("gvcf/splits/chr{c}/{sample}_reg{i}.g.vcf.gz", c=chr, i=range(1,chr_reg[chr]), sample=SAMPLES)
+    list_creater.extend(_list_per_chr)
+    list_creater_input[chr]=list_creater
+'''
+def list_creater(wildcards):
+    list_creater=[]
+    _list_per_chr=expand("gvcf/splits/chr{c}/{sample}_reg{i}.g.vcf.gz", c=wildcards, i=range(1,chr_reg[chr]), sample=SAMPLES)
+    list_creater.extend(_list_per_chr)
+    return(list_creater)
 
 #Creates a list of g.vcf.gz files created in the previous step, to be used in CombineGCVFs rule.
 rule ListCreater:
     input:
         #"gvcf/splits/chr{c}/{SAMPLES}_reg{i}.g.vcf.gz"
         #("gvcf/splits/chr{c}/{SAMPLES}_reg{i}.g.vcf.gz")
-        list_creater_input
+        lambda wildcards: list_creater({wildcards.c})
     output:
         "gvcf/splits/chr{c}/chr{c}_reg{i}_gvcf.list"
     shell:
