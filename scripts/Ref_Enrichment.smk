@@ -15,17 +15,7 @@ def numberOfRegions():
         nr_files=len(files)
         chr_reg[chr]=nr_files
 
-'''
-def output_files():
-    numberOfRegions()
-    out_list=[]
-    for chr in chrs:
-        for i in range(1, chr_reg[chr]):
-            out_dir=("apply_var_recal/splits/chr%i/chr%i_reg%i.recalibrated.vcf.gz" % (chr,chr,i))
-            out_list.append(out_dir)
-    print(" ".join(out_list))
-    return(" ".join(out_list))
-'''
+
 
 SAMPLES, = glob_wildcards("poles_example/{sample}.bam")
 chromosomes, = glob_wildcards("chr_pos_test/chr{chr_id}/")
@@ -65,7 +55,7 @@ rule HaplotypeCaller:
     resources:
         mem='5g',
         time='24:0:0',
-        threads=1
+        threads=4
     shell:
         r"""
         gatk --java-options -Xmx{resources.mem} HaplotypeCaller --add-output-vcf-command-line \
@@ -79,23 +69,7 @@ rule HaplotypeCaller:
         --native-pair-hmm-threads {resources.threads} \
         --min-pruning 2 --force-call-filtered-alleles true --alleles {params.chr_pos}
         """
-'''
-rule IndexVcf:
-    input:
-        "gvcf/chr{c}/{SAMPLES}.g.vcf.gz"
-    output:
-        "gvcf/chr{c}/{SAMPLES}.g.vcf.gz.tbi"
-    envmodules:
-        "bcftools"
-    resources:
-        mem='1g',
-        time='00:30:0',
-        threads=1
-    shell:
-        r"""
-            bcftools index -t -f {input} -o {output}
-        """
-'''
+
 
 rule GVCFSplit:
     input:
@@ -116,14 +90,7 @@ rule GVCFSplit:
             bcftools view {input.gvcf} -Oz -R {input.reg} -o {output}
             bcftools index -t {output}
         """
-'''
-list_creater_input={}
-for chr in chrs:
-    list_creater=[]
-    _list_per_chr=expand("gvcf/splits/chr{c}/{sample}_reg{i}.g.vcf.gz", c=chr, i=range(1,chr_reg[chr]), sample=SAMPLES)
-    list_creater.extend(_list_per_chr)
-    list_creater_input[chr]=list_creater
-'''
+
 def list_creater(chr, reg):
     list_creater=[]
     _list_per_chr=expand("gvcf/splits/chr{c}/{sample}_reg{i}.g.vcf.gz", c=chr, i=reg, sample=SAMPLES)
@@ -150,7 +117,7 @@ rule CombineGVCFs:
         #expand("gvcf/chr{c}/{sample}.g.vcf.gz", sample=bams, c=chrs)
         "gvcf/splits/chr{c}/chr{c}_reg{i}_gvcf.list"
     output:
-        "gvcf/splits/chr{c}/combined_reg{i}.g.vcf.gz"
+        "gvcf/splits/chr{c}/combined/combined_reg{i}.g.vcf.gz"
     params:
         ref=config["ref"],
         #int_1000=config["pos_1000"]
@@ -159,7 +126,7 @@ rule CombineGVCFs:
     resources:
         mem='20g',
         time='24:0:0',
-        threads=8
+        threads=1
     log:
         "logs/CombineGVCFs/splits/chr{c}_reg{i}.log"
     shell:
@@ -173,9 +140,9 @@ rule CombineGVCFs:
 
 rule GenotypeGVCFs:
     input:
-        "gvcf/splits/chr{c}/combined_reg{i}.g.vcf.gz"
+        "gvcf/splits/chr{c}/combined/combined_reg{i}.g.vcf.gz"
     output:
-        "gvcf/splits/chr{c}/chr{c}_reg{i}.vcf.gz"
+        "GenotypeGVCFs/splits/chr{c}/chr{c}_reg{i}.vcf.gz"
     params:
         ref=config["ref"],
         #int_1000=config["pos_1000"]
@@ -202,7 +169,7 @@ rule GenotypeGVCFs:
 #and novel variations to figure out the probability of each call to be true.
 rule VariantRecalibrator:
     input:
-        gvcf="gvcf/splits/chr{c}/chr{c}_reg{i}.vcf.gz",
+        gvcf="GenotypeGVCFs/splits/chr{c}/chr{c}_reg{i}.vcf.gz",
         hap_map="/gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/References/hapmap_3.3.hg38.vcf.gz",
         omni="/gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/References/1000G_omni2.5.hg38.vcf.gz",
         TG="/gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/References/1000G_phase1.snps.high_confidence.hg38.vcf.gz",
@@ -247,7 +214,7 @@ rule VariantRecalibrator:
 #Second phase of VQSR, apply a score cutoff to filter variants based on a recalibration table. 
 rule ApplyVQSR:
     input:
-        gvcf="gvcf/splits/chr{c}/chr{c}_reg{i}.vcf.gz",
+        gvcf="GenotypeGVCFs/splits/chr{c}/chr{c}_reg{i}.vcf.gz",
         recal="var_recal/splits/chr{c}/chr{c}_reg{i}_sitesonly_AP.recal",
         tranch="var_recal/splits/chr{c}/chr{c}_reg{i}_sitesonly_AP.tranches"
     log:
@@ -257,7 +224,7 @@ rule ApplyVQSR:
     resources:
         mem='5g',
         time='24:0:0',
-        threads=4
+        threads=1
     output:
         "apply_var_recal/splits/chr{c}/chr{c}_reg{i}.recalibrated.vcf.gz"
     shell:
