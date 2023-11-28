@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=Ref_Enrich
+#SBATCH --job-name=Ref_Enrich_21
 #SBATCH --time=48:00:00
 #SBATCH --mem=1G
 #SBATCH --cpus-per-task=1
@@ -11,4 +11,4 @@
 module load snakemake
 #module load gatk
 
-snakemake -s Ref_Enrichment.smk --profile config_dir/ --use-envmodules
+snakemake -s Ref_Enrichment.smk --profile config_dir/ --use-envmodules 

@@ -6,7 +6,7 @@ configfile: "/gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/scripts
 #bams=["100_19965_20", "101_19226_20", "102_19843_20", "10_30_20","103_19902_20"]
 
 chr_reg={}
-chrs=[22]
+chrs=[21]
 
 def numberOfRegions():
     for chr in chrs:
@@ -18,20 +18,22 @@ def numberOfRegions():
 
 
 SAMPLES, = glob_wildcards("poles_example/{sample}.bam")
-chromosomes, = glob_wildcards("chr_pos_test/chr{chr_id}/")
+#chromosomes, = glob_wildcards("chr_pos_test/chr{chr_id}/")
 
 
 numberOfRegions() #number of splits per chromosome
+'''
 out_files=[]
 #expanding the output files before adding them into the rule all.
 for chr in chrs:
-    _out_per_chr=expand("apply_var_recal/splits/chr{c}/chr{c}_reg{i}.recalibrated.vcf.gz", c=chr, i=range(1,chr_reg[chr]+1))
+    _out_per_chr=expand("apply_var_recal/splits/HRC_EST_POL.recalibrated.vcf.gz", c=chr, i=range(1,chr_reg[chr]+1))
     out_files.extend(_out_per_chr)
+'''
 
 rule all:
     input:
         #lambda wildcards: output_files()
-        out_files
+        expand("apply_var_recal/chr{c}/HRC_EST_POL.recalibrated.vcf.gz", c=chrs)
 
 
 #Call germline SNPs and indels via local re-assembly of haplotypes.
@@ -50,6 +52,8 @@ rule HaplotypeCaller:
     params:
         ref=config["ref"],
         chr_pos=config["chr_pos"]
+    benchmark:
+        "benchmarks/HaplotypeCaller/chr{c}/chr{c}_{SAMPLES}.benchmark.txt"
     envmodules:
         "gatk"
     resources:
@@ -79,6 +83,8 @@ rule GVCFSplit:
         "gvcf/splits/chr{c}/{SAMPLES}_reg{i}.g.vcf.gz"
     log:
         "logs/GVCFSplit/chr{c}/{SAMPLES}_reg{i}.log"
+    benchmark:
+        "benchmarks/GVCFSplit/chr{c}/chr{c}_{SAMPLES}_reg{i}.benchmark.txt"
     envmodules:
         "bcftools"
     resources:
@@ -87,8 +93,7 @@ rule GVCFSplit:
         threads=1
     shell:
         r"""
-            bcftools view {input.gvcf} -Oz -R {input.reg} -o {output}
-            bcftools index -t {output}
+            bcftools view {input.gvcf} -Oz -R {input.reg} -o {output} --write-index
         """
 
 def list_creater(chr, reg):
@@ -121,6 +126,8 @@ rule CombineGVCFs:
     params:
         ref=config["ref"],
         #int_1000=config["pos_1000"]
+    benchmark:
+        "benchmarks/CombineGVCFs/chr{c}/chr{c}_reg{i}.benchmark.txt"
     envmodules:
         "gatk"
     resources:
@@ -147,6 +154,8 @@ rule GenotypeGVCFs:
         ref=config["ref"],
         #int_1000=config["pos_1000"]
         chr_pos=config["chr_pos"]
+    benchmark:
+        "benchmarks/GenotypeGVCFs/chr{c}/chr{c}_reg{i}.benchmark.txt"
     envmodules:
         "gatk"
     resources:
@@ -161,7 +170,34 @@ rule GenotypeGVCFs:
         -R {params.ref} \
         -V {input}  -O {output} \
         -L {params.chr_pos} -all-sites
-        """ 
+        """
+
+concat_input_files=[]
+#expanding the output files before adding them into the rule all.
+for chr in chrs:
+    _in_per_chr=expand("GenotypeGVCFs/splits/chr{c}/chr{c}_reg{i}.vcf.gz", c=chr, i=range(1,chr_reg[chr]+1))
+    concat_input_files.extend(_in_per_chr)
+
+rule bcftoolsConcat:
+    input:
+        concat_input_files
+    output:
+        "bcftoolsConcat/chr{c}/HRC_EST_POL.vcf.gz"
+    benchmark:
+        "benchmarks/bcftoolsConcat/chr{c}/HRC_EST_POL.txt" #CHANGE WHEN RUNNING FOR WHOLE GENOME
+    resources:
+        mem='20g',
+        time='24:0:0',
+        threads=1        
+    log:
+        "logs/bcftoolsConcat/chr{c}/HRC_EST_POL.log"
+    envmodules:
+        "bcftools"
+    shell:
+        r"""
+            bcftools concat -Oz -o {output} {input}
+            tabix -p vcf {output}
+        """
 
 #Build a recalibration model to score variant quality for filtering purposes
 #performs the first pass in Variant Quality Score Recalibration (VQSR). Builds the model to be used in ApplyVQSR.
@@ -169,15 +205,15 @@ rule GenotypeGVCFs:
 #and novel variations to figure out the probability of each call to be true.
 rule VariantRecalibrator:
     input:
-        gvcf="GenotypeGVCFs/splits/chr{c}/chr{c}_reg{i}.vcf.gz",
+        gvcf="bcftoolsConcat/chr{c}/HRC_EST_POL.vcf.gz",
         hap_map="/gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/References/hapmap_3.3.hg38.vcf.gz",
         omni="/gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/References/1000G_omni2.5.hg38.vcf.gz",
         TG="/gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/References/1000G_phase1.snps.high_confidence.hg38.vcf.gz",
         dbsnp="/gpfs/space/GI/references/annotation_references/dbSNP/155/GCF_000001405.39_fixed_chr_names.gz"
     output:
-        recal="var_recal/splits/chr{c}/chr{c}_reg{i}_sitesonly_AP.recal",
-        tranch="var_recal/splits/chr{c}/chr{c}_reg{i}_sitesonly_AP.tranches",
-        r_script="var_recal/splits/chr{c}/chr{c}_reg{i}_sitesonly_AP.plots.R"
+        recal="var_recal/chr{c}/HRC_EST_POL_sitesonly_AP.recal",
+        tranch="var_recal/chr{c}/HRC_EST_POL_sitesonly_AP.tranches",
+        r_script="var_recal/chr{c}/HRC_EST_POL_sitesonly_AP.plots.R"
     params:
         ref=config["ref"],
         #int_1000=config["pos_1000"],
@@ -185,12 +221,14 @@ rule VariantRecalibrator:
     envmodules:
         "gatk",
         "any/R/4.0.3"
+    benchmark:
+        "benchmarks/VariantRecalibrator/chr{c}/HRC_EST_POL.txt"
     resources:
         mem='2g',
         time='24:0:0',
         threads=1       
     log:
-        "logs/VariantRecalibrator/splits/chr{c}/chr{c}_reg{i}_sitesonly.log"
+        "logs/VariantRecalibrator/chr{c}/HRC_EST_POL_sitesonly.log"
     shell:
         r"""
         gatk VariantRecalibrator \
@@ -214,19 +252,21 @@ rule VariantRecalibrator:
 #Second phase of VQSR, apply a score cutoff to filter variants based on a recalibration table. 
 rule ApplyVQSR:
     input:
-        gvcf="GenotypeGVCFs/splits/chr{c}/chr{c}_reg{i}.vcf.gz",
-        recal="var_recal/splits/chr{c}/chr{c}_reg{i}_sitesonly_AP.recal",
-        tranch="var_recal/splits/chr{c}/chr{c}_reg{i}_sitesonly_AP.tranches"
+        gvcf="bcftoolsConcat/chr{c}/HRC_EST_POL.vcf.gz",
+        recal="var_recal/chr{c}/HRC_EST_POL_sitesonly_AP.recal",
+        tranch="var_recal/chr{c}/HRC_EST_POL_sitesonly_AP.tranches"
     log:
-         "logs/ApplyVQSR/splits/chr{c}_reg{i}.recalibrated.log"
+         "logs/ApplyVQSR/chr{c}/HRC_EST_POL.recalibrated.log"
     envmodules:
         "gatk"
+    benchmark:
+        "benchmarks/ApplyVQSR/chr{c}/HRC_EST_POL.txt"    
     resources:
         mem='5g',
         time='24:0:0',
         threads=1
     output:
-        "apply_var_recal/splits/chr{c}/chr{c}_reg{i}.recalibrated.vcf.gz"
+        "apply_var_recal/chr{c}/HRC_EST_POL.recalibrated.vcf.gz"
     shell:
         r"""
         gatk --java-options -Xmx{resources.mem} ApplyVQSR \

@@ -1,5 +1,5 @@
 ref: /gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/References/Homo_sapiens_assembly38.fasta
-chr_pos: /gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/scripts/chr_pos_test/chr22_filtered.vcf.gz
+chr_pos: /gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/HRC_chr_pos/chr21_autosomal_filtered_reheader.vcf.gz
 #pos_1000: /gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/chr22_filtered_pos_1000.intervals
 pos_1000: /gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/test.intervals
 #samples: poles_example/*.bam
