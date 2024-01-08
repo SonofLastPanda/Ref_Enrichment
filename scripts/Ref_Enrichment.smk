@@ -1,12 +1,13 @@
 # snakemake -s snakefile --profile folder/ --use-envmodules
 # ask for 1Gb, 1CPU, 48h
 import os
+from glob import glob
 
 configfile: "/gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/scripts/config.yaml"
 #bams=["100_19965_20", "101_19226_20", "102_19843_20", "10_30_20","103_19902_20"]
 
 chr_reg={}
-chrs=[21]
+chrs=list(range(1,23))
 
 def numberOfRegions():
     for chr in chrs:
@@ -17,7 +18,7 @@ def numberOfRegions():
 
 
 
-SAMPLES, = glob_wildcards("poles_example/{sample}.bam")
+SAMPLES, = glob_wildcards("poles_example_full/{sample}.bam")
 #chromosomes, = glob_wildcards("chr_pos_test/chr{chr_id}/")
 
 
@@ -33,7 +34,8 @@ for chr in chrs:
 rule all:
     input:
         #lambda wildcards: output_files()
-        expand("apply_var_recal/chr{c}/HRC_EST_POL.recalibrated.vcf.gz", c=chrs)
+        #expand("apply_var_recal/chr{c}/HRC_EST_POL.recalibrated.vcf.gz", c=chrs)
+        "norm_var_recal/HRC_EST_POL.recalibrated.encoded.norm.vcf.gz"
 
 
 #Call germline SNPs and indels via local re-assembly of haplotypes.
@@ -44,14 +46,15 @@ rule HaplotypeCaller:
     input:
         #"poles_example/{SAMPLES}.bam"
         #config["samples"]
-        "poles_example/{SAMPLES}.bam"
+        bam="poles_example/{SAMPLES}.bam",
+        region="/gpfs/space/home/alacamli/HRC_EST_POL/Ref_Enrichment/HRC_chr_pos/chr{c}_autosomal_filtered_reheader.vcf.gz"
     output:
         "gvcf/chr{c}/{SAMPLES}.g.vcf.gz"
     log:
         "logs/HaplotypeCaller/chr{c}/{SAMPLES}.log"
     params:
-        ref=config["ref"],
-        chr_pos=config["chr_pos"]
+        ref=config["ref"]
+        #chr_pos=config["chr_pos"]
     benchmark:
         "benchmarks/HaplotypeCaller/chr{c}/chr{c}_{SAMPLES}.benchmark.txt"
     envmodules:
@@ -65,13 +68,13 @@ rule HaplotypeCaller:
         gatk --java-options -Xmx{resources.mem} HaplotypeCaller --add-output-vcf-command-line \
         -R {params.ref} \
         -O {output} \
-        -L {params.chr_pos} \
+        -L {input.region} \
         -ERC GVCF \
-        -I {input} \
+        -I {input.bam} \
         --output-mode EMIT_ALL_ACTIVE_SITES \
         --create-output-variant-index true \
         --native-pair-hmm-threads {resources.threads} \
-        --min-pruning 2 --force-call-filtered-alleles true --alleles {params.chr_pos}
+        --min-pruning 2 --force-call-filtered-alleles true --alleles {input.region}
         """
 
 
@@ -93,7 +96,8 @@ rule GVCFSplit:
         threads=1
     shell:
         r"""
-            bcftools view {input.gvcf} -Oz -R {input.reg} -o {output} --write-index
+            bcftools view {input.gvcf} -Oz -R {input.reg} -o {output}
+            tabix -p vcf {output}
         """
 
 def list_creater(chr, reg):
@@ -147,7 +151,8 @@ rule CombineGVCFs:
 
 rule GenotypeGVCFs:
     input:
-        "gvcf/splits/chr{c}/combined/combined_reg{i}.g.vcf.gz"
+        combined="gvcf/splits/chr{c}/combined/combined_reg{i}.g.vcf.gz",
+        region="/gpfs/space/home/alacamli/HRC_EST_POL/Ref_Enrichment/HRC_chr_pos/chr{c}_autosomal_filtered_reheader.vcf.gz"
     output:
         "GenotypeGVCFs/splits/chr{c}/chr{c}_reg{i}.vcf.gz"
     params:
@@ -168,29 +173,29 @@ rule GenotypeGVCFs:
         r"""
         gatk --java-options -Xmx{resources.mem} GenotypeGVCFs \
         -R {params.ref} \
-        -V {input}  -O {output} \
-        -L {params.chr_pos} -all-sites
+        -V {input.combined}  -O {output} \
+        -L {input.region} -all-sites
         """
 
 concat_input_files=[]
 #expanding the output files before adding them into the rule all.
-for chr in chrs:
-    _in_per_chr=expand("GenotypeGVCFs/splits/chr{c}/chr{c}_reg{i}.vcf.gz", c=chr, i=range(1,chr_reg[chr]+1))
+for ch in chrs:
+    _in_per_chr=expand("GenotypeGVCFs/splits/chr{c}/chr{c}_reg{i}.vcf.gz", c=ch, i=range(1,chr_reg[ch]+1))
     concat_input_files.extend(_in_per_chr)
 
 rule bcftoolsConcat:
     input:
         concat_input_files
     output:
-        "bcftoolsConcat/chr{c}/HRC_EST_POL.vcf.gz"
+        "bcftoolsConcat/HRC_EST_POL.vcf.gz"
     benchmark:
-        "benchmarks/bcftoolsConcat/chr{c}/HRC_EST_POL.txt" #CHANGE WHEN RUNNING FOR WHOLE GENOME
+        "benchmarks/bcftoolsConcatHRC_EST_POL.txt" #CHANGE WHEN RUNNING FOR WHOLE GENOME
     resources:
         mem='20g',
         time='24:0:0',
         threads=1        
     log:
-        "logs/bcftoolsConcat/chr{c}/HRC_EST_POL.log"
+        "logs/bcftoolsConcatHRC_EST_POL.log"
     envmodules:
         "bcftools"
     shell:
@@ -205,15 +210,15 @@ rule bcftoolsConcat:
 #and novel variations to figure out the probability of each call to be true.
 rule VariantRecalibrator:
     input:
-        gvcf="bcftoolsConcat/chr{c}/HRC_EST_POL.vcf.gz",
+        gvcf="bcftoolsConcat/HRC_EST_POL.vcf.gz",
         hap_map="/gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/References/hapmap_3.3.hg38.vcf.gz",
         omni="/gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/References/1000G_omni2.5.hg38.vcf.gz",
         TG="/gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/References/1000G_phase1.snps.high_confidence.hg38.vcf.gz",
         dbsnp="/gpfs/space/GI/references/annotation_references/dbSNP/155/GCF_000001405.39_fixed_chr_names.gz"
     output:
-        recal="var_recal/chr{c}/HRC_EST_POL_sitesonly_AP.recal",
-        tranch="var_recal/chr{c}/HRC_EST_POL_sitesonly_AP.tranches",
-        r_script="var_recal/chr{c}/HRC_EST_POL_sitesonly_AP.plots.R"
+        recal="var_recal/HRC_EST_POL_sitesonly_AP.recal",
+        tranch="var_recal/HRC_EST_POL_sitesonly_AP.tranches",
+        r_script="var_recal/HRC_EST_POL_sitesonly_AP.plots.R"
     params:
         ref=config["ref"],
         #int_1000=config["pos_1000"],
@@ -222,13 +227,13 @@ rule VariantRecalibrator:
         "gatk",
         "any/R/4.0.3"
     benchmark:
-        "benchmarks/VariantRecalibrator/chr{c}/HRC_EST_POL.txt"
+        "benchmarks/VariantRecalibrator/HRC_EST_POL.txt"
     resources:
-        mem='2g',
+        mem='50g',
         time='24:0:0',
         threads=1       
     log:
-        "logs/VariantRecalibrator/chr{c}/HRC_EST_POL_sitesonly.log"
+        "logs/VariantRecalibrator/HRC_EST_POL_sitesonly.log"
     shell:
         r"""
         gatk VariantRecalibrator \
@@ -243,7 +248,6 @@ rule VariantRecalibrator:
         -O {output.recal} \
         --tranches-file {output.tranch} \
         --rscript-file {output.r_script} \
-        --dont-run-rscript \
         -L {params.chr_pos} \
         --trust-all-polymorphic
         """   
@@ -252,21 +256,21 @@ rule VariantRecalibrator:
 #Second phase of VQSR, apply a score cutoff to filter variants based on a recalibration table. 
 rule ApplyVQSR:
     input:
-        gvcf="bcftoolsConcat/chr{c}/HRC_EST_POL.vcf.gz",
-        recal="var_recal/chr{c}/HRC_EST_POL_sitesonly_AP.recal",
-        tranch="var_recal/chr{c}/HRC_EST_POL_sitesonly_AP.tranches"
+        gvcf="bcftoolsConcat/HRC_EST_POL.vcf.gz",
+        recal="var_recal/HRC_EST_POL_sitesonly_AP.recal",
+        tranch="var_recal/HRC_EST_POL_sitesonly_AP.tranches"
     log:
-         "logs/ApplyVQSR/chr{c}/HRC_EST_POL.recalibrated.log"
+         "logs/ApplyVQSRHRC_EST_POL.recalibrated.log"
     envmodules:
         "gatk"
     benchmark:
-        "benchmarks/ApplyVQSR/chr{c}/HRC_EST_POL.txt"    
+        "benchmarks/ApplyVQSRHRC_EST_POL.txt"    
     resources:
-        mem='5g',
+        mem='50g',
         time='24:0:0',
         threads=1
     output:
-        "apply_var_recal/chr{c}/HRC_EST_POL.recalibrated.vcf.gz"
+        "apply_var_recal/HRC_EST_POL.recalibrated.vcf.gz"
     shell:
         r"""
         gatk --java-options -Xmx{resources.mem} ApplyVQSR \
@@ -277,3 +281,45 @@ rule ApplyVQSR:
         --create-output-variant-index true \
         -mode SNP -O {output}
         """
+    
+rule encodeMissingness:
+    input:
+        "apply_var_recal/HRC_EST_POL.recalibrated.vcf.gz"
+    output:
+        "encoded_var_recal/HRC_EST_POL.recalibrated.encoded.vcf.gz"
+    envmodules:
+        "bcftools"
+    log:
+        "logs/encodeMissingness/HRC_EST_POL.recalibrated.vcf.gz"
+    benchmark:
+        "benchmarks/encodeMissingness/HRC_EST_POL.recalibrated.txt"
+    resources:
+        mem='5g',
+        time='24:0:0',
+        threads=1
+    shell:
+        r"""
+        bcftools +fill-tags {input} -Oz -o {output} -- -t F_MISSING
+        tabix -p vcf {output}
+        """
+
+rule NormVCF:
+    input:
+        "encoded_var_recal/HRC_EST_POL.recalibrated.encoded.vcf.gz"
+    output:
+        "norm_var_recal/HRC_EST_POL.recalibrated.encoded.norm.vcf.gz"
+    envmodules:
+        "bcftools"
+    log:
+        "logs/normVCF/HRC_EST_POL.recalibrated.encoded.norm.vcf.gz"
+    benchmark:
+        "benchmarks/normVCF/HRC_EST_POL.recalibrated.encoded.norm.vcf.gz"
+    resources:
+        mem='5g',
+        time='24:0:0',
+        threads=1
+    shell:
+        r"""
+        bcftools norm {input} -Oz -o {output} -m -
+        """
+
