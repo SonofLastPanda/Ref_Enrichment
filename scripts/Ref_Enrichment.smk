@@ -30,18 +30,24 @@ for chr in chrs:
     _out_per_chr=expand("apply_var_recal/splits/HRC_EST_POL.recalibrated.vcf.gz", c=chr, i=range(1,chr_reg[chr]+1))
     out_files.extend(_out_per_chr)
 '''
-
+'''
 rule all:
     input:
         #lambda wildcards: output_files()
         #expand("apply_var_recal/chr{c}/HRC_EST_POL.recalibrated.vcf.gz", c=chrs)
         "norm_var_recal/HRC_EST_POL.recalibrated.encoded.norm.vcf.gz"
+'''
+
+rule all:
+    input:
+        "norm_var_recal/HRC_EST_POL.recalibrated.encoded.norm.snps.vcf.gz"
 
 
 #Call germline SNPs and indels via local re-assembly of haplotypes.
 #capable of calling SNPs via local de-novo assembly of haplotypes in an active region.
 #whenever the program encounters a region showing signs of variation, 
 #it discards the existing mapping information and completely reassembles the reads in that region
+
 rule HaplotypeCaller:
     input:
         #"poles_example/{SAMPLES}.bam"
@@ -56,13 +62,13 @@ rule HaplotypeCaller:
         ref=config["ref"]
         #chr_pos=config["chr_pos"]
     benchmark:
-        "benchmarks/HaplotypeCaller/chr{c}/chr{c}_{SAMPLES}.benchmark.txt"
+        "benchmarks/HaplotypeCaller/chr{c}_{SAMPLES}.benchmark.txt"
     envmodules:
         "gatk"
     resources:
         mem='5g',
         time='24:0:0',
-        threads=4
+        threads=1
     shell:
         r"""
         gatk --java-options -Xmx{resources.mem} HaplotypeCaller --add-output-vcf-command-line \
@@ -189,13 +195,13 @@ rule bcftoolsConcat:
     output:
         "bcftoolsConcat/HRC_EST_POL.vcf.gz"
     benchmark:
-        "benchmarks/bcftoolsConcatHRC_EST_POL.txt" #CHANGE WHEN RUNNING FOR WHOLE GENOME
+        "benchmarks/bcftoolsConcat/HRC_EST_POL.txt" #CHANGE WHEN RUNNING FOR WHOLE GENOME
     resources:
         mem='20g',
         time='24:0:0',
         threads=1        
     log:
-        "logs/bcftoolsConcatHRC_EST_POL.log"
+        "logs/bcftoolsConcat/HRC_EST_POL.log"
     envmodules:
         "bcftools"
     shell:
@@ -214,7 +220,7 @@ rule VariantRecalibrator:
         hap_map="/gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/References/hapmap_3.3.hg38.vcf.gz",
         omni="/gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/References/1000G_omni2.5.hg38.vcf.gz",
         TG="/gpfs/space/GI/ebc_data/projects/HRC_EST_POL/Ref_Enrichment/References/1000G_phase1.snps.high_confidence.hg38.vcf.gz",
-        dbsnp="/gpfs/space/GI/references/annotation_references/dbSNP/155/GCF_000001405.39_fixed_chr_names.gz"
+        dbsnp="/gpfs/space/home/alacamli/HRC_EST_POL/Ref_Enrichment/References/Homo_sapiens_assembly38.dbsnp138.vcf7"
     output:
         recal="var_recal/HRC_EST_POL_sitesonly_AP.recal",
         tranch="var_recal/HRC_EST_POL_sitesonly_AP.tranches",
@@ -229,7 +235,7 @@ rule VariantRecalibrator:
     benchmark:
         "benchmarks/VariantRecalibrator/HRC_EST_POL.txt"
     resources:
-        mem='50g',
+        mem='30g',
         time='24:0:0',
         threads=1       
     log:
@@ -248,6 +254,7 @@ rule VariantRecalibrator:
         -O {output.recal} \
         --tranches-file {output.tranch} \
         --rscript-file {output.r_script} \
+        --dont-run-rscript \
         -L {params.chr_pos} \
         --trust-all-polymorphic
         """   
@@ -266,7 +273,7 @@ rule ApplyVQSR:
     benchmark:
         "benchmarks/ApplyVQSRHRC_EST_POL.txt"    
     resources:
-        mem='50g',
+        mem='10g',
         time='24:0:0',
         threads=1
     output:
@@ -290,11 +297,11 @@ rule encodeMissingness:
     envmodules:
         "bcftools"
     log:
-        "logs/encodeMissingness/HRC_EST_POL.recalibrated.vcf.gz"
+        "logs/encodeMissingness/HRC_EST_POL.recalibrated.encoded.log"
     benchmark:
         "benchmarks/encodeMissingness/HRC_EST_POL.recalibrated.txt"
     resources:
-        mem='5g',
+        mem='1g',
         time='24:0:0',
         threads=1
     shell:
@@ -307,13 +314,13 @@ rule NormVCF:
     input:
         "encoded_var_recal/HRC_EST_POL.recalibrated.encoded.vcf.gz"
     output:
-        "norm_var_recal/HRC_EST_POL.recalibrated.encoded.norm.vcf.gz"
+        "norm_var_recal/HRC_EST_POL.recalibrated.encoded.norm.all.vcf.gz"
     envmodules:
         "bcftools"
     log:
-        "logs/normVCF/HRC_EST_POL.recalibrated.encoded.norm.vcf.gz"
+        "logs/normVCF/HRC_EST_POL.recalibrated.encoded.norm.all.log"
     benchmark:
-        "benchmarks/normVCF/HRC_EST_POL.recalibrated.encoded.norm.vcf.gz"
+        "benchmarks/normVCF/HRC_EST_POL.recalibrated.encoded.norm.all.txt"
     resources:
         mem='5g',
         time='24:0:0',
@@ -321,5 +328,27 @@ rule NormVCF:
     shell:
         r"""
         bcftools norm {input} -Oz -o {output} -m -
+        tabix -p vcf {output}
         """
+rule filterSNPS:
+    input:
+        "norm_var_recal/HRC_EST_POL.recalibrated.encoded.norm.all.vcf.gz"
+    output:
+        "norm_var_recal/HRC_EST_POL.recalibrated.encoded.norm.snps.vcf.gz"
+    envmodules:
+        "bcftools"
+    log:
+        "logs/filterSNPs/HRC_EST_POL.recalibrated.encoded.norm.snps.log"
+    benchmark:
+        "benchmarks/filterSNPs/HRC_EST_POL.recalibrated.encoded.norm.snps.txt"
+    resources:
+        mem='5g',
+        time='24:0:0',
+        threads=1
+    shell:
+        r"""
+        bcftools norm {input} -Oz -o {output} -m -
+        tabix -p vcf {output}
+        """
+
 
